@@ -8,6 +8,7 @@ variable "db_password" {
   description = "Mot de passe applicatif, fourni par TF_VAR_db_password (jamais dans un fichier)"
   type        = string
   sensitive   = true
+  ephemeral = true
   # PAS de valeur par defaut : sans TF_VAR_db_password, Terraform refuse de continuer.
 
   validation {
