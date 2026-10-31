@@ -3,7 +3,7 @@
 Projet fil rouge du Master SRC (encadrant : Hemerson KOFFI).
 Ce dépôt déploie une infrastructure web en haute disponibilité sur **AWS Academy Learner Lab** (région `us-east-1`) : un Application Load Balancer devant un groupe d'auto-scaling d'au moins 2 serveurs nginx, répartis sur 2 zones de disponibilité. Il y a deux environnements isolés, **dev** et **prod**.
 
-> État d'avancement : dev est déployé et testé. Le secret SSM et `SECURITE.md` sont écrits (déploiement du secret **à tester**). Prod, la bucket policy pour les coéquipiers et la CI GitHub Actions sont **à venir** (voir la section « Avancement »).
+> État d'avancement : dev et prod sont déployés par la CI GitHub Actions (prod après approbation) et testés de bout en bout. Le secret SSM, la bucket policy pour les coéquipiers et l'extension Session Manager sont en place (voir la section « Avancement » et `RESTE_A_FAIRE.md`).
 
 ## Documentation
 
@@ -11,7 +11,9 @@ Ce dépôt déploie une infrastructure web en haute disponibilité sur **AWS Aca
 |---|---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Schéma, composants, choix de conception et alternatives | P1 |
 | [SECURITE.md](SECURITE.md) | Secrets, politique IAM idéale, réseau, résultats des scans, vérifications anti-secret | P2 |
-| CONTRIBUTING.md | Règles de travail en équipe : **à venir** | P3 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Règles de travail en équipe | P3 |
+| [CADRAGE.md](CADRAGE.md) | Fiche de cadrage : équipe, extension choisie (Session Manager), options écartées | Équipe |
+| [RESTE_A_FAIRE.md](RESTE_A_FAIRE.md) | État final du projet, ce qui reste à faire, limites connues | Équipe |
 
 ## Prérequis
 
@@ -31,6 +33,10 @@ Terraform_projet_fil_rouge/
 ├── README.md                  ce fichier
 ├── ARCHITECTURE.md            schéma et choix de conception
 ├── SECURITE.md                secrets, politique IAM idéale, résultats des scans
+├── CONTRIBUTING.md            règles de travail en équipe
+├── CADRAGE.md                 fiche de cadrage et extension choisie
+├── RESTE_A_FAIRE.md           état final, reste à faire, limites connues
+├── .github/workflows/         CI/CD GitHub Actions (ci-cd.yml)
 ├── .gitignore                 exclut state, tfvars, clés, cache Terraform
 ├── .gitattributes             fins de ligne Linux (LF) pour .sh, .tf, .hcl, .md...
 ├── .trivyignore               exceptions du scan trivy, avec leur justification
@@ -48,12 +54,10 @@ Terraform_projet_fil_rouge/
     │   ├── network.tf         VPC du registre public (2 zones, subnets publics, sans NAT)
     │   ├── web.tf             appel du module d'équipe par tag
     │   ├── secrets.tf         secret SSM (SecureString, value_wo) et sa variable ephemeral
-    │   ├── bootstrap.sh       script de démarrage des serveurs
+    │   ├── bootstrap.sh       script de démarrage des serveurs (nginx, agent SSM, lecture du secret)
     │   └── outputs.tf         URL de l'ALB, nom de l'ASG...
     └── prod/                  mêmes fichiers ; seuls backend.tf et les valeurs changent
 ```
-
-À venir : `.github/workflows/` (CI, P3) et `CONTRIBUTING.md` (P3).
 
 ## Module d'équipe
 
@@ -161,23 +165,38 @@ Les ressources sont facturées à l'heure sur le budget du Learner Lab. Ne détr
 | Instances min / voulu / max | 2 / 2 / 4 | 2 / 3 / 6 |
 | Clé du state | `novasphere/dev/terraform.tfstate` | `novasphere/prod/terraform.tfstate` |
 
+## Extension : administration sans SSH (Session Manager)
+
+Les serveurs n'ont ni port 22 ni clé SSH. On s'y connecte par **SSM Session Manager** : l'agent SSM est installé par `bootstrap.sh` et l'instance s'enregistre grâce au `LabInstanceProfile`. Cette extension a été testée dans le Learner Lab : les serveurs apparaissent `Online` dans Systems Manager et un terminal s'ouvre depuis la console. Le choix est expliqué dans [CADRAGE.md](CADRAGE.md).
+
+**Par la console AWS** : EC2, puis Instances, cocher un serveur `novasphere-<env>`, cliquer sur **Connect**, choisir l'onglet **SSM Session Manager**, puis **Connect**. Un terminal s'ouvre dans le navigateur.
+
+**Par la ligne de commande** (demande le plugin Session Manager pour AWS CLI) :
+
+```bash
+aws ssm describe-instance-information --query "InstanceInformationList[].[InstanceId,PingStatus]" --output table
+aws ssm start-session --target <instance-id>
+```
+
+La première commande liste les serveurs joignables (`Online`). Si la liste est vide juste après un déploiement, attendre 2 minutes : l'agent démarre à la fin de l'installation.
+
 ## Intégration continue (CI)
 
-**À venir : responsable P3.** Elle sera faite avec GitHub Actions :
+La CI utilise GitHub Actions (`.github/workflows/ci-cd.yml`, responsable P3) :
 
-- sur chaque Pull Request : `terraform fmt -check`, `validate`, puis le plan en commentaire ;
-- au merge sur `main` : `apply` de dev à partir du fichier de plan ;
-- prod : derrière un environnement GitHub protégé (approbation manuelle) ;
-- un job de détection de dérive (`plan -detailed-exitcode`).
+- sur chaque Pull Request : `terraform fmt -check`, checkov, `init`, `validate`, puis le plan de dev en commentaire ;
+- au merge sur `main` : `apply` de dev, puis `apply` de prod **après approbation manuelle** (environnement GitHub `prod`) ;
+- les fichiers `.md` sont ignorés (`paths-ignore`) : une modification de documentation ne déclenche pas de déploiement ;
+- un job de détection de dérive (`plan -detailed-exitcode`), lancé chaque matin de semaine et à la demande.
 
-La CI fournira les variables `TF_VAR_owner`, `TF_VAR_environment` et `TF_VAR_vpc_cidr`. Dans le Learner Lab, elle utilise les identifiants de session stockés dans les secrets du dépôt (à rafraîchir avant la démonstration). Avec un compte AWS personnel, on utiliserait un rôle OIDC.
+La CI fournit les variables `TF_VAR_owner`, `TF_VAR_environment`, `TF_VAR_vpc_cidr` et `TF_VAR_db_password` (secret GitHub `DB_PASSWORD`). Dans le Learner Lab, elle utilise les identifiants de session stockés dans les secrets du dépôt : **ils expirent à chaque session** et sont à rafraîchir avant la démonstration. Avec un compte AWS personnel, on utiliserait un rôle OIDC, impossible à créer dans le Lab.
 
 ## Sécurité
 
-- **Aucun secret dans le dépôt, le state ni le script de démarrage.** Le mot de passe applicatif est dans SSM Parameter Store (SecureString), écrit avec `value_wo` à partir d'une variable *ephemeral* (`TF_VAR_db_password`), et lu par les serveurs au démarrage. Déploiement réel **à tester** dans le Learner Lab.
-- Les serveurs n'ont **pas de SSH** et n'acceptent le trafic que de l'ALB.
+- **Aucun secret dans le dépôt, le state ni le script de démarrage.** Le mot de passe applicatif est dans SSM Parameter Store (SecureString), écrit avec `value_wo` à partir d'une variable *ephemeral* (`TF_VAR_db_password`), et lu par les serveurs au démarrage. Déployé en dev et en prod par la CI ; le mot de passe n'apparaît pas dans le state (vérifié).
+- Les serveurs n'ont **pas de SSH** (administration par Session Manager, voir plus haut) et n'acceptent le trafic que de l'ALB.
 - IMDSv2 est obligatoire et le disque racine est chiffré.
-- Scans : checkov sur `envs/dev` et `envs/prod` (modules compris) : 115 contrôles réussis, 0 échec, 20 ignorés, chaque exception justifiée dans le code ; trivy : 0 alerte restante, 4 exceptions justifiées dans `.trivyignore`. Détail dans [SECURITE.md](SECURITE.md).
+- Scans : checkov sur `envs/dev` et `envs/prod` (modules compris) : 115 contrôles réussis, 0 échec, 20 ignorés par environnement (résultat confirmé le 31/10/2026 avec checkov 3.4.0), chaque exception justifiée dans le code ; trivy : 0 alerte restante, 4 exceptions justifiées dans `.trivyignore`. Détail dans [SECURITE.md](SECURITE.md).
 - Le state et les fichiers `*.tfvars` sont exclus par `.gitignore`.
 
 ### Vérifier qu'aucun secret n'est commité
@@ -197,21 +216,22 @@ Chaque commande doit afficher « OK ». Le fichier `terraform.tfvars.example` es
 | Élément | État |
 |---|---|
 | State S3 partagé (versionné, chiffré, verrou natif) | Fait |
-| Module `terraform-aws-web` v1.0.0 | Fait |
+| Module `terraform-aws-web` v1.0.1 | Fait |
 | `envs/dev` | Déployé et testé dans le Learner Lab |
-| `envs/prod` | Écrit, validé, **déploiement à tester** |
-| Bucket policy pour les coéquipiers | **À venir** (en attente de leurs numéros de compte) |
-| Secret SSM (`value_wo`) | Écrit et validé, **déploiement à tester** |
-| `SECURITE.md`, scans checkov et trivy | Fait (les points « à tester » y sont indiqués) |
-| CI GitHub Actions, `CONTRIBUTING.md` | **À venir** (P3) |
-| Extension (bonus) | À décider |
+| `envs/prod` | Déployé par la CI après approbation et testé dans le Learner Lab |
+| Bucket policy pour les coéquipiers | Appliquée (comptes de P2 et P3) |
+| Secret SSM (`value_wo`) | Déployé en dev et en prod, absent du state (vérifié) |
+| `SECURITE.md`, scans checkov et trivy | Fait (les points restant à vérifier y sont indiqués) |
+| CI GitHub Actions, `CONTRIBUTING.md` | Fait : dev et prod déployés par la CI, prod derrière approbation |
+| Extension : administration sans SSH (Session Manager) | Faite et testée (voir `CADRAGE.md`) |
+| `CADRAGE.md`, `RESTE_A_FAIRE.md` | Fait |
 
 ## Équipe
 
 | Rôle | Membre | Responsabilités |
 |---|---|---|
-| P1 : infrastructure, référent AWS | Pengchao WANG ([@Pengchao020401](https://github.com/Pengchao020401)) | State S3, `envs/dev` et `envs/prod`, module `terraform-aws-web`, `ARCHITECTURE.md` |
+| P1 : infrastructure, référent AWS | Pengchao WANG ([@Pengchao020401](https://github.com/Pengchao020401)) | State S3, `envs/dev` et `envs/prod`, module `terraform-aws-web`, `ARCHITECTURE.md`, tag `rendu-final` (posé par Pengchao) |
 | P2 : sécurité | Bristhis Debgeko (@Bristhis25) | Secret SSM, politique IAM idéale, scan checkov, `SECURITE.md` |
-| P3 : automatisation, référent Git | Serdy Adam Siassia Dekamo (@adamdekamo-lgtm) | GitHub Actions, protection de `main`, `CONTRIBUTING.md`, tag `rendu-final` |
+| P3 : automatisation, référent Git | Serdy Adam Siassia Dekamo (@adamdekamo-lgtm) | GitHub Actions, protection de `main`, `CONTRIBUTING.md` |
 
 Règles d'équipe : chacun commite depuis son poste sous son propre nom, chaque Pull Request est relue par un autre membre, aucun push direct sur `main`.
