@@ -58,10 +58,4 @@ variable "desired_capacity" {
   default     = 2
 }
 
-# P2 (securite) ajoute ici la variable du secret, sans valeur par defaut :
-#
-# variable "db_password" {
-#   description = "Mot de passe applicatif, fourni par TF_VAR_db_password"
-#   type        = string
-#   ephemeral   = true
-# }
+# La variable du secret (db_password, ephemeral, sans valeur par defaut) est dans secrets.tf.

@@ -22,3 +22,8 @@ output "vpc_id" {
   description = "Identifiant du VPC"
   value       = module.vpc.vpc_id
 }
+
+output "db_password_parameter_name" {
+  description = "Nom du parametre SSM qui contient le mot de passe (jamais sa valeur)"
+  value       = aws_ssm_parameter.db_password.name
+}

@@ -6,3 +6,10 @@ instance_type    = "t3.micro"
 min_size         = 2
 max_size         = 4
 desired_capacity = 2
+
+# Secret : db_password ne se met JAMAIS dans ce fichier.
+# Il se passe par l'environnement, saisie masquee :
+#   read -rs TF_VAR_db_password && export TF_VAR_db_password
+# (en CI : secret GitHub DB_PASSWORD, expose en TF_VAR_db_password)
+# Rotation : augmenter db_password_version (par defaut 1).
+# db_password_version = 1
