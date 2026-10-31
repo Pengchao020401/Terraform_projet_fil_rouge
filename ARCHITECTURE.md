@@ -3,7 +3,7 @@
 Projet fil rouge Terraform, Master SRC. Environnement : AWS Academy Learner Lab, région `us-east-1`.
 
 Ce document décrit l'infrastructure déployée par ce dépôt : ce qu'on a construit, pourquoi, et ce qui reste à faire.
-Il a été rédigé par **P1 (Pengchao, infrastructure et référent AWS)**. Les parties qui appartiennent aux autres membres sont marquées **P2** (sécurité) et **P3** (automatisation et Git). Tout ce qui n'est pas encore réalisé est indiqué **« à venir »**.
+Il a été rédigé par **P1 (Pengchao, infrastructure et référent AWS)**. Les parties qui appartiennent aux autres membres sont marquées **P2** (sécurité) et **P3** (automatisation et Git). Ce qui n'est pas réalisé ou pas vérifié est indiqué en toutes lettres (section 10 et `RESTE_A_FAIRE.md`).
 
 ## 1. Vue d'ensemble
 
@@ -16,7 +16,7 @@ Deux dépôts Git :
 | Dépôt | Rôle |
 |---|---|
 | [Terraform_projet_fil_rouge](https://github.com/Pengchao020401/Terraform_projet_fil_rouge) | Le projet : environnements, réseau, état, documentation |
-| [terraform-aws-web](https://github.com/Pengchao020401/terraform-aws-web) | Le module d'équipe (ALB + ASG + Launch Template), appelé par le tag `v1.0.0` |
+| [terraform-aws-web](https://github.com/Pengchao020401/terraform-aws-web) | Le module d'équipe (ALB + ASG + Launch Template), appelé par le tag `v1.0.1` |
 
 ## 2. Schéma
 
@@ -41,7 +41,7 @@ flowchart TB
 
     ssm["SSM Parameter Store<br/>db_password SecureString<br/>value_wo : absent du state"]
     s3["S3 novasphere-tfstate-pwa<br/>state versionne et chiffre<br/>une cle par environnement"]
-    dev["Poste de travail ou CI<br/>terraform plan et apply<br/>CI a venir : P3"]
+    dev["Poste de travail ou CI<br/>terraform plan et apply<br/>CI : GitHub Actions"]
 
     user -->|"HTTP 80"| igw
     igw --> alb
@@ -65,10 +65,10 @@ flowchart TB
 | Modèle de serveur | `aws_launch_template.this` | module | Debian 12, IMDSv2 obligatoire, disque racine gp3 chiffré, `LabInstanceProfile`, script de démarrage |
 | Groupe d'auto-scaling | `aws_autoscaling_group.this` | module | Au moins 2 serveurs sur 2 zones, `health_check_type = "ELB"`, remplacement progressif (instance refresh) |
 | Image | `data.aws_ami.debian` | `envs/*/main.tf` | Image Debian 12 officielle la plus récente |
-| Script de démarrage | `bootstrap.sh` | `envs/*/` | 9 lignes : installe nginx, écrit la page, lit le secret dans SSM |
+| Script de démarrage | `bootstrap.sh` | `envs/*/` | 9 lignes : installe nginx, écrit la page, installe l'agent SSM, lit le secret dans SSM |
 | État partagé | bucket S3 `novasphere-tfstate-pwa` | `envs/*/backend.tf`, `bootstrap-state/` | Versionné, chiffré, accès public bloqué, verrou natif |
-| Secret applicatif | `aws_ssm_parameter` (SecureString, `value_wo`) | `envs/*/secrets.tf` | Mot de passe `/novasphere/<env>/db_password`, lu par les serveurs au démarrage. Écrit, validé, **déploiement à tester**. Voir `SECURITE.md` |
-| Chaîne de livraison | GitHub Actions | **à venir (P3)** | Plan en commentaire de PR, apply dev au merge, prod protégée, détection de dérive |
+| Secret applicatif | `aws_ssm_parameter` (SecureString, `value_wo`) | `envs/*/secrets.tf` | Mot de passe `/novasphere/<env>/db_password`, lu par les serveurs au démarrage. Déployé en dev et en prod par la CI, absent du state (vérifié). Voir `SECURITE.md` |
+| Chaîne de livraison | GitHub Actions | `.github/workflows/ci-cd.yml` (P3) | Plan en commentaire de PR, apply dev au merge, prod après approbation, détection de dérive. Testée de bout en bout |
 
 ## 4. Réseau et flux
 
@@ -89,7 +89,7 @@ Les flux autorisés, et seulement eux :
 | ALB | Serveurs web | 80 | Entrée du groupe `web` avec **source = groupe `alb`**, pas une plage d'adresses |
 | Serveurs web | Internet | 80 | Sortie : installation des paquets (`apt`) |
 | Serveurs web | Internet | 443 | Sortie : `apt` et API SSM Parameter Store |
-| Administrateur | Serveurs web | aucun | **Pas de port 22, pas de clé SSH** |
+| Administrateur | Serveurs web | aucun | **Pas de port 22, pas de clé SSH** (administration par SSM Session Manager, voir l'extension) |
 
 Un serveur a une adresse IP publique (nécessaire pour sortir par l'Internet Gateway sans NAT), mais aucune règle ne laisse entrer le trafic d'Internet : seul l'ALB peut joindre un serveur.
 
@@ -99,7 +99,7 @@ Un serveur a une adresse IP publique (nécessaire pour sortir par l'Internet Gat
 - **Protection du bucket** : versioning activé (retour possible à un état précédent), chiffrement AES256, accès public entièrement bloqué, et une bucket policy qui refuse tout accès non chiffré (`aws:SecureTransport`).
 - **Un état par environnement** : `novasphere/dev/terraform.tfstate` et `novasphere/prod/terraform.tfstate`. Une erreur dans dev ne peut donc pas modifier prod.
 - **Verrou** : `use_lockfile = true` (verrou natif S3, un fichier `.tflock` à côté de l'état). Pas de table DynamoDB : cette méthode est dépréciée.
-- **Partage avec l'équipe** : la bucket policy autorise le `LabRole` des coéquipiers. Elle sera appliquée quand P2 et P3 auront donné leur numéro de compte AWS : **à venir**. L'accès entre comptes n'a pas encore été testé.
+- **Partage avec l'équipe** : la bucket policy autorise le `LabRole` des coéquipiers. Elle est appliquée avec les numéros de compte AWS de P2 et P3.
 
 ## 6. Environnements : dev et prod
 
@@ -115,7 +115,7 @@ Les deux dossiers ont **exactement les mêmes fichiers**. Seules ces valeurs cha
 
 Les noms de ressources suivent le modèle `novasphere-<environnement>-<trigramme>`, par exemple `novasphere-dev-pwa`. Les étiquettes (`Project`, `Environment`, `Owner`, `ManagedBy`) sont posées par `default_tags` et, pour les serveurs lancés par l'ASG, par le module.
 
-**Statut** : l'environnement **dev** a été déployé et testé dans le Learner Lab (la page répond et alterne entre 2 serveurs situés dans 2 zones). Le déploiement de **prod** et la vérification du plan vide sont **à venir**. Le module a été appelé en chemin local pour ce test, puis l'appel par tag `v1.0.0` a été validé avec `terraform init` et `terraform validate`.
+**Statut** : les environnements **dev** et **prod** ont été déployés par la CI et testés dans le Learner Lab (la page répond et alterne entre les serveurs situés dans 2 zones ; 3 serveurs en prod). Le module est appelé par le tag `v1.0.1`.
 
 ## 7. Le module `terraform-aws-web`
 
@@ -141,7 +141,7 @@ source = "git::https://github.com/Pengchao020401/terraform-aws-web.git?ref=v1.0.
 | **`health_check_type = "ELB"`** | L'ASG remplace un serveur dont le site ne répond plus, pas seulement un serveur éteint | Il faut un délai de grâce (180 s) pour laisser le temps d'installer nginx |
 | **`min_size >= 2` sur 2 zones** | Une panne d'une zone ne coupe pas le site | Deux serveurs en permanence, même en dev |
 | **Groupes de sécurité chaînés** | Le groupe `web` accepte le groupe `alb` comme source : même si les adresses changent, la règle reste juste | Aucun |
-| **Pas de SSH, pas de clé** | Moins de surface d'attaque. Les serveurs sont jetables et se configurent par script, on ne les administre pas à la main | Pour diagnostiquer, il faut passer par les logs ou remplacer le serveur. L'administration par SSM Session Manager serait une extension possible |
+| **Pas de SSH, pas de clé** | Moins de surface d'attaque. Les serveurs sont jetables et se configurent par script, on ne les administre pas à la main | Pour diagnostiquer, il faut passer par les logs ou remplacer le serveur. L'administration se fait par SSM Session Manager (voir l'extension) |
 | **IMDSv2 obligatoire** (`http_tokens = "required"`, `hop_limit = 1`) | Empêche le vol des identifiants du serveur par une requête détournée (SSRF) | Les anciens outils qui utilisent IMDSv1 ne fonctionnent plus (aucun ici) |
 | **Disque racine chiffré** (gp3) | Protège les données au repos, sans coût visible | Aucun |
 | **`LabInstanceProfile`** | Le Learner Lab interdit de créer un rôle IAM : on utilise celui qui existe. La politique idéale est décrite dans `SECURITE.md` | Ce profil est plus large que nécessaire (principe du moindre privilège non respecté) |
@@ -160,7 +160,7 @@ source = "git::https://github.com/Pengchao020401/terraform-aws-web.git?ref=v1.0.
 - **State local** : écarté (il plafonne la note Terraform, et il ne se partage pas).
 - **Table DynamoDB pour le verrou** : écartée (déprécié, remplacé par `use_lockfile`).
 - **Serveur unique sans ASG** : écarté (pas de haute disponibilité).
-- **Accès SSH avec clé** : écarté (surface d'attaque, et pas nécessaire).
+- **Accès SSH avec clé** : écarté (surface d'attaque). Remplacé par Session Manager.
 
 ### Extension choisie
 
@@ -183,11 +183,10 @@ source = "git::https://github.com/Pengchao020401/terraform-aws-web.git?ref=v1.0.
 ## 10. Limites connues et améliorations
 
 **Limites actuelles**
-- Dev est testé, **prod ne l'est pas encore**. Le plan vide sur le dépôt gelé n'est pas encore vérifié.
-- Le secret SSM est écrit (`secrets.tf`) mais **pas encore déployé ni testé** dans le Learner Lab. Les serveurs ne démarrent qu'après la création du paramètre (`depends_on`). Si le paramètre manquait, la lecture du script échouerait et `/etc/novasphere/app.conf` resterait vide : le site fonctionnerait quand même, car le script n'arrête pas nginx.
-- Le profil `LabInstanceProfile` doit autoriser la lecture du paramètre SSM : **à vérifier** au premier déploiement du secret (voir `SECURITE.md`).
-- La bucket policy pour les coéquipiers n'est pas encore appliquée ni testée (**à venir**, il manque leurs numéros de compte).
-- La CI GitHub Actions (**P3**) n'existe pas encore : aucun plan automatique, aucun apply par la chaîne. Les `apply` faits à la main ne sont qu'un test.
+- Dev et prod sont testés. La vérification systématique d'un plan vide (`No changes`) après déploiement n'est pas documentée.
+- Le secret SSM est déployé en dev et en prod et n'apparaît pas dans le state (vérifié). En revanche, **la lecture du paramètre par les serveurs au démarrage n'a pas été vérifiée** (contenu de `/etc/novasphere/app.conf`). Les serveurs ne démarrent qu'après la création du paramètre (`depends_on`). Si la lecture échouait, `app.conf` resterait vide : le site fonctionnerait quand même, car le script n'arrête pas nginx.
+- Le profil `LabInstanceProfile` doit autoriser la lecture du paramètre SSM : **à vérifier** (voir `SECURITE.md`). Il permet bien l'enregistrement des serveurs dans Systems Manager.
+- La CI GitHub Actions (**P3**) est en place et testée (apply dev, puis prod après approbation). Elle dépend d'identifiants de session du Learner Lab qui expirent (section 9).
 - HTTP uniquement, pas de HTTPS, pas de WAF, pas de journaux d'accès de l'ALB.
 - Les serveurs sont dans des subnets publics.
 - Pas de protection contre la suppression de l'ALB (volontaire : le lab impose un `destroy`).
@@ -197,7 +196,7 @@ source = "git::https://github.com/Pengchao020401/terraform-aws-web.git?ref=v1.0.
 - Subnets privés et NAT Gateway (ou points de terminaison VPC pour SSM) hors Learner Lab.
 - Rôle IAM dédié avec la politique minimale.
 - Mise à l'échelle automatique selon la charge (politique de scaling sur le CPU).
-- Tests du module (`terraform test`) et scan checkov / trivy dans la CI.
+- Tests du module (`terraform test`) et scan trivy dans la CI (checkov y est déjà).
 - Pin des sources Git par hash de commit plutôt que par tag (réponse au contrôle checkov `CKV_TF_1`, aujourd'hui documenté dans le code).
 
 ## 11. Qui fait quoi

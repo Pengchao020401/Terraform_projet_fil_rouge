@@ -2,15 +2,15 @@
 
 Partie **P2 : sécurité** du projet. Ce document explique comment les secrets sont gérés, ce qui est protégé, ce qui a été scanné, et surtout **ce qui n'est pas parfait** (section « Risques restants »). Il est écrit pour être relu par le jury.
 
-> **Statut honnête.** Le code du secret est écrit et passe `terraform fmt` et `terraform validate` pour dev et prod. Il a été testé hors ligne (comportement de `value_wo`, validation de la variable). Il n'a **pas encore été déployé** dans le Learner Lab : tout ce qui dépend d'AWS est marqué **« à tester »**. La procédure de test est dans le vault (`Partie securite - comment tester`).
+> **Statut honnête.** Le code du secret passe `terraform fmt` et `terraform validate` pour dev et prod. Il a été déployé dans le Learner Lab, en dev et en prod, par la CI. Le mot de passe n'apparaît pas dans le state (vérifié sur le vrai state). Ce qui n'a **pas** été vérifié est marqué **« à tester »** (section 11) : en particulier la lecture du secret par les serveurs au démarrage.
 
 ## 1. En résumé
 
 | Sujet | Mesure | État |
 |---|---|---|
-| Mot de passe applicatif | SSM Parameter Store, type `SecureString`, écrit avec `value_wo` | Écrit et validé, déploiement **à tester** |
+| Mot de passe applicatif | SSM Parameter Store, type `SecureString`, écrit avec `value_wo` | Déployé en dev et en prod par la CI |
 | Mot de passe dans le code | Aucune valeur : variable `ephemeral`, sans valeur par défaut | Vérifié par `git grep` |
-| Mot de passe dans le state | Absent grâce à `value_wo` (attribut en écriture seule) | Vérifié hors ligne ; sur le vrai state **à tester** |
+| Mot de passe dans le state | Absent grâce à `value_wo` (attribut en écriture seule) | Vérifié hors ligne et sur le vrai state (0 occurrence) |
 | Mot de passe dans `user_data` | Absent : le script lit SSM au démarrage | Vérifié (lecture du script) |
 | Accès SSH | Aucun (pas de port 22, pas de clé) | Fait |
 | Trafic vers les serveurs | Uniquement depuis l'ALB (groupe de sécurité) | Fait |
@@ -18,7 +18,7 @@ Partie **P2 : sécurité** du projet. Ce document explique comment les secrets s
 | State Terraform | S3 versionné, chiffré, accès public bloqué, verrou `use_lockfile` | Fait |
 | Droits IAM des serveurs | `LabInstanceProfile` (limite du Lab), politique idéale documentée | Limite assumée |
 | Scans | checkov et trivy, 0 échec restant, exceptions justifiées | Fait |
-| Secrets en CI | Secrets GitHub | **À venir** (P3) |
+| Secrets en CI | Secrets GitHub | Fait (P3) |
 
 ## 2. Gestion du secret
 
@@ -64,7 +64,7 @@ Comme Terraform ne garde pas la valeur, il **ne peut pas détecter** qu'elle a c
 read -rs TF_VAR_db_password && export TF_VAR_db_password
 ```
 
-- **En CI** (P3, **à venir**) : un secret GitHub `DB_PASSWORD`, exposé au job sous le nom `TF_VAR_db_password`. Les logs GitHub masquent les secrets, mais on ne doit jamais faire `echo` du mot de passe.
+- **En CI** (P3) : un secret GitHub `DB_PASSWORD`, exposé au job sous le nom `TF_VAR_db_password`. Les logs GitHub masquent les secrets, mais on ne doit jamais faire `echo` du mot de passe.
 - **Jamais** dans `terraform.tfvars` (ignoré par Git de toute façon) : le fichier `terraform.tfvars.example` ne contient qu'un commentaire.
 
 ### Rotation
@@ -148,13 +148,13 @@ Le state est dans le bucket S3 `novasphere-tfstate-pwa`, créé par `bootstrap-s
 - une clé par environnement (`novasphere/dev/...` et `novasphere/prod/...`) ;
 - la bucket policy interdit le trafic non chiffré (`aws:SecureTransport`).
 
-**Bucket policy pour les coéquipiers : à venir.** Elle est prête (`bucket-policy.json.template`) mais attend les numéros de compte AWS des coéquipiers, qui donneront l'accès à leur `LabRole` (`arn:aws:iam::<compte>:role/LabRole`). Tant qu'elle n'est pas appliquée, seul le propriétaire du bucket accède au state. Les `LabRole` ont besoin de `GetObject`, `PutObject` et `DeleteObject` (le verrou crée et supprime un fichier `.tflock`).
+**Bucket policy pour les coéquipiers : appliquée.** Elle part du modèle `bucket-policy.json.template` et donne l'accès au `LabRole` de P2 et de P3 (`arn:aws:iam::<compte>:role/LabRole`). Sans elle, seul le propriétaire du bucket accède au state. Les `LabRole` ont besoin de `GetObject`, `PutObject` et `DeleteObject` (le verrou crée et supprime un fichier `.tflock`).
 
 Même avec `value_wo`, le state contient d'autres informations sensibles (identifiants de ressources, adresses IP). Il ne doit **jamais** être commité (`.gitignore`) ni partagé hors du bucket.
 
 ## 7. Résultats des scans
 
-Détail complet dans le vault (`Checkov - resultats projet`). Scans faits sans AWS, avec checkov 3.3.30 et trivy 0.76.1.
+Détail complet dans le vault (`Checkov - resultats projet`). Scans faits sans AWS, avec checkov 3.3.30 et trivy 0.76.1. Les scans checkov de `envs/dev` et `envs/prod` ont été relancés le 31/10/2026 avec checkov 3.4.0 (modules téléchargés) : mêmes résultats, 115 réussis, 0 échec, 20 ignorés par environnement (120 / 0 / 35 pour les deux dossiers scannés ensemble). trivy n'a pas été relancé.
 
 | Outil | Cible | Réussis | Échecs | Ignorés |
 |---|---|---|---|---|
@@ -183,7 +183,7 @@ Détail complet dans le vault (`Checkov - resultats projet`). Scans faits sans A
 | `AWS-0104` | Sortie des serveurs limitée aux ports 80 et 443 (pas fermée : nécessaire pour installer nginx) |
 | `AWS-0178` | Pas de logs de flux du VPC : coût, hors périmètre |
 
-Les alertes les plus sérieuses de trivy (listener HTTP, sortie vers Internet) viennent du **module figé en `v1.0.0`** : on les documente, on ne modifie pas un tag publié.
+Les alertes les plus sérieuses de trivy (listener HTTP, sortie vers Internet) viennent du **module figé en `v1.0.1`** : on les documente, on ne modifie pas un tag publié.
 
 Commandes :
 
@@ -203,13 +203,13 @@ git grep -nE 'AKIA[0-9A-Z]{16}|aws_secret_access_key|aws_session_token|BEGIN (RS
 git grep -niE 'password *= *"' -- '*.tf' || echo "OK : aucun mot de passe en clair dans les .tf"
 ```
 
-Pour l'historique Git, un outil de type gitleaks fait la même chose sur tous les commits (**à tester**, non installé ici) :
+Pour l'historique Git, un outil de type gitleaks fait la même chose sur tous les commits (**non lancé**, outil non installé) :
 
 ```bash
 gitleaks detect --source . --redact
 ```
 
-**Preuve pour le state** (après un `apply` réel, **à tester**). Remplacer la valeur par le mot de passe saisi, sans l'écrire dans l'historique :
+**Preuve pour le state** (après un `apply` réel ; résultat obtenu : 0). Remplacer la valeur par le mot de passe saisi, sans l'écrire dans l'historique :
 
 ```bash
 terraform state pull | grep -c "$TF_VAR_db_password"
@@ -223,11 +223,11 @@ Vérifier que le paramètre existe, **sans afficher sa valeur** :
 aws ssm get-parameter --name /novasphere/dev/db_password --query 'Parameter.[Name,Type,Version]' --output text
 ```
 
-## 9. Secrets en CI (P3, à venir)
+## 9. Secrets en CI (P3)
 - Identifiants AWS de session du Lab et `DB_PASSWORD` dans les **secrets du dépôt GitHub** (jamais dans le code ni dans un fichier de workflow).
 - Le job exporte `TF_VAR_db_password` à partir du secret et n'affiche jamais sa valeur.
-- Le fichier de plan produit par la CI ne contient pas le mot de passe (variable `ephemeral`) : c'est vérifié hors ligne, mais **à tester** en vrai.
-- Prod derrière un environnement GitHub protégé (approbation manuelle). Avec un compte AWS personnel, on utiliserait OIDC plutôt que des clés.
+- Le fichier de plan produit par la CI ne contient pas le mot de passe (variable `ephemeral`) : c'est vérifié hors ligne ; la CI a déployé dev et prod avec ce mécanisme.
+- Prod derrière un environnement GitHub protégé (approbation manuelle), testée. Les identifiants de session du Lab expirent à chaque session : il faut les remettre à jour dans les secrets avant chaque démonstration. Avec un compte AWS personnel, on utiliserait OIDC plutôt que des clés.
 
 ## 10. Risques restants
 
@@ -238,12 +238,11 @@ aws ssm get-parameter --name /novasphere/dev/db_password --query 'Parameter.[Nam
 5. **Mot de passe simple à valider** : seule la longueur est vérifiée (12 caractères), pas la complexité.
 6. **Rotation manuelle** : il faut augmenter `db_password_version` et renouveler les serveurs.
 7. **Un mot de passe par environnement** : si dev et prod utilisent la même valeur, la séparation des deux environnements ne sert à rien. Il faut deux valeurs différentes.
-8. **Bucket policy des coéquipiers pas encore appliquée** (en attente de leurs numéros de compte).
-9. **Rien de tout cela n'est encore déployé en vrai** : voir la liste « à tester » ci-dessous.
+8. **Points non vérifiés** : voir la liste « à tester » ci-dessous.
 
 ## 11. À tester dans le Learner Lab
-- `apply` de dev avec `TF_VAR_db_password` : le paramètre est créé, les serveurs deviennent sains.
+Fait : `apply` de dev et de prod avec `TF_VAR_db_password` (le paramètre est créé, les serveurs deviennent sains) et recherche du mot de passe dans le state (0 résultat). Reste à vérifier :
+
 - `LabRole` lit et déchiffre le `SecureString` (le fichier `app.conf` n'est pas vide : à vérifier par une session sur l'instance si possible, sinon via les journaux de démarrage `cloud-init`).
-- `terraform state pull | grep` du mot de passe : 0 résultat.
 - `plan` après l'`apply` : « No changes » (le groupe par défaut vidé ne doit plus bouger).
 - Rotation avec `db_password_version = 2`.
