@@ -1,0 +1,6 @@
+*.sh text eol=lf
+*.tf text eol=lf
+*.hcl text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.template text eol=lf
