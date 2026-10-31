@@ -199,5 +199,5 @@ source = "git::https://github.com/Pengchao020401/terraform-aws-web.git?ref=v1.0.
 | Rôle | Responsable | Parties de ce document |
 |---|---|---|
 | P1 : infrastructure, module, état, référent AWS | Pengchao | Sections 1 à 10 |
-| P2 : sécurité | à compléter | Secret SSM, politique IAM idéale, `SECURITE.md` |
-| P3 : automatisation, CI, référent Git | à compléter | GitHub Actions, protection de `main`, `CONTRIBUTING.md` |
+| P2 : sécurité | @Bristhis25 | Secret SSM, politique IAM idéale, `SECURITE.md` |
+| P3 : automatisation, CI, référent Git | Serdy Adam Siassia Dekamo | GitHub Actions, protection de `main`, `CONTRIBUTING.md` |

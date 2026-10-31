@@ -199,7 +199,7 @@ Chaque commande doit afficher « OK ». Le fichier `terraform.tfvars.example` es
 | Rôle | Membre | Responsabilités |
 |---|---|---|
 | P1 : infrastructure, référent AWS | Pengchao WANG ([@Pengchao020401](https://github.com/Pengchao020401)) | State S3, `envs/dev` et `envs/prod`, module `terraform-aws-web`, `ARCHITECTURE.md` |
-| P2 : sécurité | à compléter | Secret SSM, politique IAM idéale, scan checkov, `SECURITE.md` |
-| P3 : automatisation, référent Git | à compléter | GitHub Actions, protection de `main`, `CONTRIBUTING.md`, tag `rendu-final` |
+| P2 : sécurité | @Bristhis25 | Secret SSM, politique IAM idéale, scan checkov, `SECURITE.md` |
+| P3 : automatisation, référent Git | Serdy Adam Siassia Dekamo | GitHub Actions, protection de `main`, `CONTRIBUTING.md`, tag `rendu-final` |
 
 Règles d'équipe : chacun commite depuis son poste sous son propre nom, chaque Pull Request est relue par un autre membre, aucun push direct sur `main`.
