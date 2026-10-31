@@ -4,9 +4,15 @@ on:
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   push:
     branches:
       - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   workflow_dispatch: # Pour pouvoir déclencher la détection de dérive à la main
   schedule:
     - cron: "0 6 * * 1-5" # Détection de dérive chaque matin de semaine
