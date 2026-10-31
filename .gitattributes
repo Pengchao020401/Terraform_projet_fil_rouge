@@ -4,3 +4,5 @@
 *.json text eol=lf
 *.yml text eol=lf
 *.template text eol=lf
+*.md text eol=lf
+*.example text eol=lf

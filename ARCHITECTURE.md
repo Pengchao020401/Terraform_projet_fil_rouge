@@ -39,7 +39,7 @@ flowchart TB
         asg["Auto Scaling Group<br/>Launch Template : IMDSv2, disque chiffre<br/>groupe de securite web"]
     end
 
-    ssm["SSM Parameter Store<br/>db_password SecureString<br/>a venir : P2"]
+    ssm["SSM Parameter Store<br/>db_password SecureString<br/>value_wo : absent du state"]
     s3["S3 novasphere-tfstate-pwa<br/>state versionne et chiffre<br/>une cle par environnement"]
     dev["Poste de travail ou CI<br/>terraform plan et apply<br/>CI a venir : P3"]
 
@@ -67,7 +67,7 @@ flowchart TB
 | Image | `data.aws_ami.debian` | `envs/*/main.tf` | Image Debian 12 officielle la plus récente |
 | Script de démarrage | `bootstrap.sh` | `envs/*/` | 9 lignes : installe nginx, écrit la page, lit le secret dans SSM |
 | État partagé | bucket S3 `novasphere-tfstate-pwa` | `envs/*/backend.tf`, `bootstrap-state/` | Versionné, chiffré, accès public bloqué, verrou natif |
-| Secret applicatif | `aws_ssm_parameter` (SecureString) | **à venir (P2)** | Mot de passe lu par les serveurs au démarrage |
+| Secret applicatif | `aws_ssm_parameter` (SecureString, `value_wo`) | `envs/*/secrets.tf` | Mot de passe `/novasphere/<env>/db_password`, lu par les serveurs au démarrage. Écrit, validé, **déploiement à tester**. Voir `SECURITE.md` |
 | Chaîne de livraison | GitHub Actions | **à venir (P3)** | Plan en commentaire de PR, apply dev au merge, prod protégée, détection de dérive |
 
 ## 4. Réseau et flux
@@ -122,7 +122,7 @@ Les noms de ressources suivent le modèle `novasphere-<environnement>-<trigramme
 Dépôt séparé, appelé par :
 
 ```hcl
-source = "git::https://github.com/Pengchao020401/terraform-aws-web.git?ref=v1.0.0"
+source = "git::https://github.com/Pengchao020401/terraform-aws-web.git?ref=v1.0.1"
 ```
 
 - **Entrées** : 15 variables typées. Obligatoires : `name`, `vpc_id`, `public_subnet_ids`, `ami_id`, `user_data`, `instance_profile_name`. Les autres ont une valeur par défaut raisonnable (`t3.micro`, 2 à 4 instances, disque de 8 Go, health check sur `/`).
@@ -130,7 +130,7 @@ source = "git::https://github.com/Pengchao020401/terraform-aws-web.git?ref=v1.0.
 - **Sorties** : 8 valeurs, dont `alb_url` (l'adresse à ouvrir), `alb_dns_name`, `asg_name`, `target_group_arn` et les identifiants des deux groupes de sécurité.
 - **Aucun bloc `provider`** : la région et les étiquettes sont configurées par l'environnement qui appelle le module. Le module déclare seulement les versions requises (Terraform `>= 1.9`, provider AWS `~> 6.28`).
 - **Versionnement par tag** : une version = un tag Git. Un tag publié n'est jamais déplacé. Pour changer le module : modifier, tester en dev, poser `v1.1.0`, puis changer `?ref=` dans `envs/dev/web.tf`, et enfin dans `envs/prod/web.tf`.
-- **Scan de sécurité** (checkov sur le module) : 39 contrôles réussis, 0 échec, 9 ignorés. Chaque exception est écrite dans `main.tf` avec sa raison. Le détail sera dans `SECURITE.md` (**P2**).
+- **Scan de sécurité** (checkov sur le module) : 39 contrôles réussis, 0 échec, 9 ignorés. Chaque exception est écrite dans `main.tf` avec sa raison. Le détail est dans `SECURITE.md`.
 
 ## 8. Choix de conception, raisons et compromis
 
@@ -144,12 +144,13 @@ source = "git::https://github.com/Pengchao020401/terraform-aws-web.git?ref=v1.0.
 | **Pas de SSH, pas de clé** | Moins de surface d'attaque. Les serveurs sont jetables et se configurent par script, on ne les administre pas à la main | Pour diagnostiquer, il faut passer par les logs ou remplacer le serveur. L'administration par SSM Session Manager serait une extension possible |
 | **IMDSv2 obligatoire** (`http_tokens = "required"`, `hop_limit = 1`) | Empêche le vol des identifiants du serveur par une requête détournée (SSRF) | Les anciens outils qui utilisent IMDSv1 ne fonctionnent plus (aucun ici) |
 | **Disque racine chiffré** (gp3) | Protège les données au repos, sans coût visible | Aucun |
-| **`LabInstanceProfile`** | Le Learner Lab interdit de créer un rôle IAM : on utilise celui qui existe. La politique idéale sera décrite dans `SECURITE.md` (**P2**) | Ce profil est plus large que nécessaire (principe du moindre privilège non respecté) |
+| **`LabInstanceProfile`** | Le Learner Lab interdit de créer un rôle IAM : on utilise celui qui existe. La politique idéale est décrite dans `SECURITE.md` | Ce profil est plus large que nécessaire (principe du moindre privilège non respecté) |
 | **Dossiers `envs/dev` et `envs/prod`, pas de workspaces** | Imposé. C'est aussi plus sûr : on voit dans quel dossier on travaille, et chaque environnement a son état | Fichiers dupliqués : on maintient la ressemblance par discipline et par revue de PR. Le module commun limite la duplication |
 | **Module dans son propre dépôt, appelé par tag** | Imposé. Le projet reste reproductible : dev et prod ne changent pas tant qu'on ne choisit pas une nouvelle version | Deux dépôts à gérer |
 | **VPC du registre public** | Module très utilisé et maintenu, moins de code à écrire et à relire | Dépendance externe, version bornée (`~> 6.7`) |
 | **Version du provider figée** (`~> 6.28` et fichier `.terraform.lock.hcl`) | Toute l'équipe utilise le même provider | Il faut mettre à jour le fichier de verrou exprès |
 | **Script de démarrage court, sans secret** | Le script lit le secret dans SSM au démarrage : il ne contient aucune valeur sensible, donc rien n'apparaît dans Git, dans l'état ou dans les logs | Les serveurs ont besoin d'un accès Internet sortant (ports 80 et 443) |
+| **Secret en `value_wo` + variable `ephemeral`** | Avec un `value` classique, le mot de passe serait écrit en clair dans le state. Ici il part vers AWS sans y être enregistré, et la variable n'est pas conservée dans le plan (voir `SECURITE.md`) | Terraform ne voit plus la valeur : un changement se déclenche en augmentant `db_password_version`. Le mot de passe doit être fourni à chaque `plan`/`apply` (`TF_VAR_db_password`) |
 | **HTTP seulement (port 80)** | Demandé par le socle. Le HTTPS est une extension possible | Trafic non chiffré entre le navigateur et l'ALB |
 
 ### Alternatives écartées
@@ -178,8 +179,8 @@ source = "git::https://github.com/Pengchao020401/terraform-aws-web.git?ref=v1.0.
 
 **Limites actuelles**
 - Dev est testé, **prod ne l'est pas encore**. Le plan vide sur le dépôt gelé n'est pas encore vérifié.
-- Le secret SSM n'est pas encore créé (**P2**). Tant que le paramètre `/novasphere/<env>/db_password` n'existe pas, la lecture du script échoue et le fichier `/etc/novasphere/app.conf` reste vide. Le site fonctionne quand même, car le script n'arrête pas nginx.
-- Le profil `LabInstanceProfile` doit autoriser la lecture du paramètre SSM : **à vérifier** quand le secret existera.
+- Le secret SSM est écrit (`secrets.tf`) mais **pas encore déployé ni testé** dans le Learner Lab. Les serveurs ne démarrent qu'après la création du paramètre (`depends_on`). Si le paramètre manquait, la lecture du script échouerait et `/etc/novasphere/app.conf` resterait vide : le site fonctionnerait quand même, car le script n'arrête pas nginx.
+- Le profil `LabInstanceProfile` doit autoriser la lecture du paramètre SSM : **à vérifier** au premier déploiement du secret (voir `SECURITE.md`).
 - La bucket policy pour les coéquipiers n'est pas encore appliquée ni testée (**à venir**, il manque leurs numéros de compte).
 - La CI GitHub Actions (**P3**) n'existe pas encore : aucun plan automatique, aucun apply par la chaîne. Les `apply` faits à la main ne sont qu'un test.
 - HTTP uniquement, pas de HTTPS, pas de WAF, pas de journaux d'accès de l'ALB.

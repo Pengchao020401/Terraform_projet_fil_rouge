@@ -1,0 +1,14 @@
+# Exceptions trivy (trivy config), chacune justifiee. Voir SECURITE.md, section "Resultats des scans".
+# Les 4 alertes viennent du module d'equipe terraform-aws-web (tag v1.0.0, gele) et du module VPC du registre.
+
+# Listener ALB en HTTP (port 80) : pas de certificat ni de nom de domaine dans le Learner Lab. HTTPS = extension possible.
+AWS-0054
+
+# Sortie des instances en 80 et 443 vers Internet : necessaire pour apt (installation de nginx) et l'API SSM, sans NAT Gateway.
+AWS-0104
+
+# IP publique sur les subnets : choix impose (pas de NAT Gateway, facturee a l'heure). L'entree reste fermee par les groupes de securite.
+AWS-0164
+
+# VPC Flow Logs : demande un role IAM ou un bucket dedie ; la creation de role IAM est interdite dans le Learner Lab.
+AWS-0178
