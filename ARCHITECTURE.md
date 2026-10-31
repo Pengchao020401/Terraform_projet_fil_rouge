@@ -164,7 +164,12 @@ source = "git::https://github.com/Pengchao020401/terraform-aws-web.git?ref=v1.0.
 
 ### Extension choisie
 
-**À décider** par l'équipe (une seule extension demandée, bonus jusqu'à 2 points, uniquement si le socle est complet). Pistes : HTTPS, administration sans SSH (SSM Session Manager), ou tests du module avec `terraform test`.
+**Administration sans SSH, par SSM Session Manager** (voir `CADRAGE.md`).
+
+- Le script de démarrage `bootstrap.sh` installe l'agent SSM (`amazon-ssm-agent`, absent de l'AMI Debian) et le démarre.
+- L'instance s'enregistre auprès de Systems Manager grâce au `LabInstanceProfile`, en sortant en HTTPS (port 443) par l'Internet Gateway : pas de VPC endpoint ni de NAT, donc aucun coût en plus.
+- On ouvre un shell sur un serveur avec `aws ssm start-session --target <instance-id>` ou depuis la console (EC2, Connect, Session Manager). Le port 22 reste fermé et il n'y a aucune clé SSH.
+- Chaque session est tracée par AWS (qui, quand, sur quelle instance), ce que SSH ne fait pas.
 
 ## 9. Contraintes du Learner Lab
 
