@@ -1,7 +1,7 @@
 # Le module d'equipe (depot terraform-aws-web), appele par tag : une version = un tag, jamais modifie apres publication.
 module "web" {
   #checkov:skip=CKV_TF_1:source git epinglee par tag de version (v1.0.0), pas par hash : choix de lisibilite pour l equipe ; le tag n est jamais deplace
-  source = "git::https://github.com/Bristhis25/terraform-aws-web.git?ref=v1.0.0"
+  source = "git::https://github.com/Pengchao020401/terraform-aws-web.git?ref=v1.0.0"
 
   name              = local.name
   vpc_id            = module.vpc.vpc_id
