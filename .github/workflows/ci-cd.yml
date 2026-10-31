@@ -8,6 +8,8 @@ on:
     branches:
       - main
   workflow_dispatch: # Pour pouvoir déclencher la détection de dérive à la main
+  schedule:
+    - cron: "0 6 * * 1-5" # Détection de dérive chaque matin de semaine
 
 permissions:
   contents: read
@@ -22,6 +24,11 @@ jobs:
     defaults:
       run:
         working-directory: envs/dev
+    env:
+      TF_VAR_owner: pwa
+      TF_VAR_environment: dev
+      TF_VAR_vpc_cidr: 10.0.0.0/16
+      TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
 
     steps:
       - name: Checkout Code
@@ -30,7 +37,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.10.0
+          terraform_version: 1.14.0
 
       - name: Configure AWS Credentials (Learner Lab)
         uses: aws-actions/configure-aws-credentials@v4
@@ -60,7 +67,7 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        run: terraform plan -no-color
+        run: terraform plan -no-color -input=false
         continue-on-error: true
 
       - name: Publish Terraform Plan to PR
@@ -96,6 +103,11 @@ jobs:
     defaults:
       run:
         working-directory: envs/dev
+    env:
+      TF_VAR_owner: pwa
+      TF_VAR_environment: dev
+      TF_VAR_vpc_cidr: 10.0.0.0/16
+      TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
 
     steps:
       - name: Checkout Code
@@ -104,7 +116,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.6.0
+          terraform_version: 1.14.0
 
       - name: Configure AWS Credentials (Learner Lab)
         uses: aws-actions/configure-aws-credentials@v4
@@ -118,7 +130,7 @@ jobs:
         run: terraform init
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve
+        run: terraform apply -auto-approve -input=false
 
   apply-prod:
     name: "Terraform Apply (Prod)"
@@ -129,6 +141,14 @@ jobs:
     defaults:
       run:
         working-directory: envs/prod
+    env:
+      TF_VAR_owner: pwa
+      TF_VAR_environment: prod
+      TF_VAR_vpc_cidr: 10.1.0.0/16
+      TF_VAR_instance_type: t3.small
+      TF_VAR_max_size: "6"
+      TF_VAR_desired_capacity: "3"
+      TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
 
     steps:
       - name: Checkout Code
@@ -137,7 +157,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.6.0
+          terraform_version: 1.14.0
 
       - name: Configure AWS Credentials (Learner Lab)
         uses: aws-actions/configure-aws-credentials@v4
@@ -151,4 +171,41 @@ jobs:
         run: terraform init
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve
+        run: terraform apply -auto-approve -input=false
+
+  drift-detection:
+    name: "Détection de dérive (Dev)"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    defaults:
+      run:
+        working-directory: envs/dev
+    env:
+      TF_VAR_owner: pwa
+      TF_VAR_environment: dev
+      TF_VAR_vpc_cidr: 10.0.0.0/16
+      TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.0
+
+      - name: Configure AWS Credentials (Learner Lab)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      # Code de sortie : 0 = pas de dérive, 2 = dérive détectée (le job échoue), 1 = erreur
+      - name: Terraform Plan (détection de dérive)
+        run: terraform plan -detailed-exitcode -no-color -input=false
